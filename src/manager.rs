@@ -12,6 +12,7 @@ use web_sys::{BinaryType, CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 use crate::error::{WsError, WsResult};
 use crate::message::WsMessage;
 use tokio::sync::mpsc;
+use tracing;
 
 /// Internal commands for controlling the websocket
 #[derive(Debug)]
@@ -38,9 +39,13 @@ impl WsManager {
         tx_msg: mpsc::UnboundedSender<WsResult<WsMessage>>,
         mut rx_cmd: mpsc::UnboundedReceiver<WsCommand>,
     ) -> WsResult<Self> {
+        tracing::info!("Initializing WebSocket manager for URL: {}", url);
         let ws = WebSocket::new(&url).map_err(|e| {
+            tracing::error!("Failed to create WebSocket: {:?}", e);
             WsError::ConnectionError(format!("Failed to create WebSocket: {:?}", e))
         })?;
+
+        tracing::debug!("WebSocket instance created");
 
         // Set binary type to arraybuffer
         ws.set_binary_type(BinaryType::Arraybuffer);
@@ -48,12 +53,15 @@ impl WsManager {
         // Handle incoming messages
         let tx_msg_clone = tx_msg.clone();
         let on_message_closure = Closure::wrap(Box::new(move |e: MessageEvent| {
+            tracing::debug!("Received WebSocket message event");
             if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
                 let text = String::from(txt);
+                tracing::trace!("Received text message: {}", text);
                 let _ = tx_msg_clone.send(Ok(WsMessage::Text(text)));
             } else if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let array = js_sys::Uint8Array::new(&array_buffer);
                 let data = array.to_vec();
+                tracing::trace!("Received binary message of {} bytes", data.len());
                 let _ = tx_msg_clone.send(Ok(WsMessage::Binary(data)));
             }
         }) as Box<dyn FnMut(MessageEvent)>);
@@ -63,6 +71,7 @@ impl WsManager {
         // Handle errors
         let tx_msg_err = tx_msg.clone();
         let on_error_closure = Closure::wrap(Box::new(move |e: ErrorEvent| {
+            tracing::error!("WebSocket error event: {:?}", e.message());
             let error = WsError::WebSocketError(format!("WebSocket error: {:?}", e.message()));
             let _ = tx_msg_err.send(Err(error));
         }) as Box<dyn FnMut(ErrorEvent)>);
@@ -72,6 +81,7 @@ impl WsManager {
         // Handle close events
         let tx_msg_close = tx_msg.clone();
         let on_close_closure = Closure::wrap(Box::new(move |e: CloseEvent| {
+            tracing::info!("WebSocket closed: code={}, reason={}", e.code(), e.reason());
             let error = WsError::ConnectionClosed {
                 code: e.code(),
                 reason: e.reason(),
@@ -83,6 +93,7 @@ impl WsManager {
 
         // Handle open event
         let on_open_closure = Closure::wrap(Box::new(move |_: JsValue| {
+            tracing::info!("WebSocket connection opened");
             // Connection opened, ready to send/receive
         }) as Box<dyn FnMut(JsValue)>);
 
@@ -92,19 +103,23 @@ impl WsManager {
         // let ws_clone = ws.clone();
         // wasm_bindgen_futures::spawn_local(async move {
         while let Some(cmd) = rx_cmd.recv().await {
+            tracing::debug!("Processing WebSocket command: {:?}", cmd);
             match cmd {
                 WsCommand::Send(msg) => {
+                    tracing::debug!("Sending message to WebSocket");
                     let result = match msg {
                         WsMessage::Text(text) => ws.send_with_str(&text),
                         WsMessage::Binary(data) => ws.send_with_u8_array(&data),
                     };
 
                     if let Err(e) = result {
+                        tracing::error!("Failed to send message to WebSocket: {:?}", e);
                         // Could send error back through channel if needed
                         web_sys::console::error_1(&format!("Send error: {:?}", e).into());
                     }
                 }
                 WsCommand::Close => {
+                    tracing::info!("Closing WebSocket connection");
                     let _ = ws.close();
                     break;
                 }
@@ -123,6 +138,7 @@ impl WsManager {
 
     /// Close the websocket connection
     pub fn close(&self) -> WsResult<()> {
+        tracing::info!("Manually closing WebSocket");
         self.ws
             .close()
             .map_err(|e| WsError::ConnectionError(format!("Failed to close: {:?}", e)))

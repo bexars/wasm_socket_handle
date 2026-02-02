@@ -8,6 +8,7 @@ use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
+use tracing;
 
 pin_project! {
     /// A handle to a websocket that can be used in async contexts.
@@ -63,6 +64,7 @@ impl WsHandle {
     /// let ws = WsHandle::new("ws://localhost:8080").unwrap();
     /// ```
     pub fn new(url: &str) -> WsResult<Self> {
+        tracing::info!("Creating WsHandle for URL: {}", url);
         let (tx_msg, rx_msg) = mpsc::unbounded_channel();
         let (tx_cmd, rx_cmd) = mpsc::unbounded_channel();
 
@@ -81,6 +83,7 @@ impl WsHandle {
     /// This sends a close command to the websocket. The connection will also
     /// be closed automatically when the handle is dropped.
     pub fn close(&self) -> WsResult<()> {
+        tracing::info!("Sending close command to WebSocket");
         self.tx_cmd
             .send(WsCommand::Close)
             .map_err(|e| WsError::ChannelError(format!("Failed to send close command: {}", e)))
@@ -112,6 +115,7 @@ impl Sink<WsMessage> for WsHandle {
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Channel is always ready unless closed
         if self.is_closed() {
+            tracing::warn!("Attempted to send on closed WebSocket connection");
             Poll::Ready(Err(WsError::ConnectionClosed {
                 code: 0,
                 reason: "Connection closed".to_string(),
@@ -122,6 +126,7 @@ impl Sink<WsMessage> for WsHandle {
     }
 
     fn start_send(self: Pin<&mut Self>, item: WsMessage) -> Result<(), Self::Error> {
+        tracing::debug!("Sending message: {:?}", item);
         self.tx_cmd
             .send(WsCommand::Send(item))
             .map_err(|e| WsError::SendError(format!("Failed to send message: {}", e)))
