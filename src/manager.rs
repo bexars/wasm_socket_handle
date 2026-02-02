@@ -39,6 +39,7 @@ impl WsManager {
         tx_msg: mpsc::UnboundedSender<WsResult<WsMessage>>,
         mut rx_cmd: mpsc::UnboundedReceiver<WsCommand>,
     ) -> WsResult<Self> {
+        web_sys::console::log_1(&"WsManager::new(..)".into());
         tracing::info!("Initializing WebSocket manager for URL: {}", url);
         let ws = WebSocket::new(&url).map_err(|e| {
             tracing::error!("Failed to create WebSocket: {:?}", e);
