@@ -115,7 +115,8 @@ impl Stream for WsHandle {
         let this = self.project();
         // Lock the receiver to poll it
         // Note: This lock should be very brief as we're just polling
-        let mut rx = this.rx_msg.lock().expect("Mutex poisoned");
+        let mut rx = this.rx_msg.lock()
+            .expect("WsHandle receiver mutex poisoned - this indicates a panic occurred while holding the lock");
         rx.poll_recv(cx)
     }
 }

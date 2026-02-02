@@ -78,13 +78,13 @@ async fn run_advanced_example() {
             break;
         }
         
-        // Simulate some work between messages
+        // Wait 1 second (1000ms) between messages
         gloo_timers::future::TimeoutFuture::new(1000).await;
     }
 
     console::log_1(&"[Sender] Finished sending messages".into());
     
-    // Give time for responses to come back
+    // Wait 2 seconds (2000ms) for responses to come back
     gloo_timers::future::TimeoutFuture::new(2000).await;
     
     // Close the connection using the original handle
