@@ -41,7 +41,6 @@ pin_project! {
         #[pin]
         rx_msg: mpsc::UnboundedReceiver<WsResult<WsMessage>>,
         tx_cmd: mpsc::UnboundedSender<WsCommand>,
-        _manager: Option<WsManager>,
     }
 }
 
@@ -67,12 +66,13 @@ impl WsHandle {
         let (tx_msg, rx_msg) = mpsc::unbounded_channel();
         let (tx_cmd, rx_cmd) = mpsc::unbounded_channel();
 
-        let manager = WsManager::new(url, tx_msg, rx_cmd)?;
+        // Create the WsManager which spawns a task to handle commands
+        // The manager stays alive through the spawned task that owns rx_cmd
+        let _manager = WsManager::new(url, tx_msg, rx_cmd)?;
 
         Ok(Self {
             rx_msg,
             tx_cmd,
-            _manager: Some(manager),
         })
     }
 

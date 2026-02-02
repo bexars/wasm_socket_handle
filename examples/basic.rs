@@ -25,7 +25,8 @@ pub async fn main() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("This example is designed to run in a WASM environment.");
     println!("Please build with --target wasm32-unknown-unknown and run in a browser.");
 }
