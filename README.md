@@ -88,11 +88,12 @@ while let Some(msg) = ws.next().await {
 
 ### Sharing Across Tasks
 
-To share the handle across multiple tasks, wrap it in an `Arc<Mutex<>>`:
+To share the handle across multiple tasks, wrap it in an `Arc<tokio::sync::Mutex<>>`:
 
 ```rust
 use futures::{SinkExt, StreamExt};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 // Wrap the handle for sharing
 let ws = Arc::new(Mutex::new(ws));
@@ -101,10 +102,7 @@ let ws = Arc::new(Mutex::new(ws));
 let ws_receiver = Arc::clone(&ws);
 wasm_bindgen_futures::spawn_local(async move {
     loop {
-        let result = {
-            let mut handle = ws_receiver.lock().unwrap();
-            handle.next().await
-        };
+        let result = ws_receiver.lock().await.next().await;
         if let Some(Ok(msg)) = result {
             println!("Received: {:?}", msg);
         } else {
@@ -115,7 +113,7 @@ wasm_bindgen_futures::spawn_local(async move {
 
 // Use from another task
 let ws_sender = Arc::clone(&ws);
-ws_sender.lock().unwrap().send(WsMessage::text("hello")).await.unwrap();
+ws_sender.lock().await.send(WsMessage::text("hello")).await.unwrap();
 ```
 
 ### Message Types

@@ -1,7 +1,7 @@
 //! Advanced example showing multiple concurrent operations
 //!
 //! This example demonstrates:
-//! - Using Arc<Mutex<>> to share the handle across tasks
+//! - Using Arc<tokio::sync::Mutex<>> to share the handle across tasks
 //! - Handling websocket in multiple async tasks
 //! - Sending and receiving concurrently
 
@@ -28,7 +28,8 @@ fn main() {
 #[cfg(target_arch = "wasm32")]
 async fn run_advanced_example() {
     use web_sys::console;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     let ws_url = "ws://localhost:8080/socket";
     console::log_1(&format!("Connecting to {}...", ws_url).into());
@@ -49,10 +50,7 @@ async fn run_advanced_example() {
     // Spawn a task to handle incoming messages
     wasm_bindgen_futures::spawn_local(async move {
         loop {
-            let result = {
-                let mut handle = ws_receiver.lock().unwrap();
-                handle.next().await
-            };
+            let result = ws_receiver.lock().await.next().await;
             
             match result {
                 Some(Ok(WsMessage::Text(text))) => {
@@ -81,12 +79,7 @@ async fn run_advanced_example() {
         let message = format!("Message number {}", i + 1);
         console::log_1(&format!("[Sender] Sending: {}", message).into());
         
-        let send_result = {
-            let mut handle = ws_sender.lock().unwrap();
-            handle.send(WsMessage::text(message)).await
-        };
-        
-        if let Err(e) = send_result {
+        if let Err(e) = ws_sender.lock().await.send(WsMessage::text(message)).await {
             console::error_1(&format!("[Sender] Failed to send: {}", e).into());
             break;
         }
@@ -101,7 +94,7 @@ async fn run_advanced_example() {
     gloo_timers::future::TimeoutFuture::new(2000).await;
     
     // Close the connection using the original handle
-    if let Err(e) = ws.lock().unwrap().close() {
+    if let Err(e) = ws.lock().await.close() {
         console::error_1(&format!("Failed to close: {}", e).into());
     } else {
         console::log_1(&"Connection closed gracefully".into());
