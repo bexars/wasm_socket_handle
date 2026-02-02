@@ -1,7 +1,7 @@
 //! Advanced example showing multiple concurrent operations
 //!
 //! This example demonstrates:
-//! - Cloning the handle to use in multiple tasks
+//! - Using Arc<Mutex<>> to share the handle across tasks
 //! - Handling websocket in multiple async tasks
 //! - Sending and receiving concurrently
 
@@ -28,12 +28,13 @@ fn main() {
 #[cfg(target_arch = "wasm32")]
 async fn run_advanced_example() {
     use web_sys::console;
+    use std::sync::{Arc, Mutex};
 
     let ws_url = "ws://localhost:8080/socket";
     console::log_1(&format!("Connecting to {}...", ws_url).into());
 
     let ws = match WsHandle::new(ws_url) {
-        Ok(ws) => ws,
+        Ok(ws) => Arc::new(Mutex::new(ws)),
         Err(e) => {
             console::error_1(&format!("Failed to connect: {}", e).into());
             return;
@@ -42,38 +43,50 @@ async fn run_advanced_example() {
 
     console::log_1(&"Connected! Starting concurrent operations...".into());
 
-    // Clone the handle for the receiver task
-    let mut ws_receiver = ws.clone();
+    // Share the handle with the receiver task
+    let ws_receiver = Arc::clone(&ws);
     
     // Spawn a task to handle incoming messages
     wasm_bindgen_futures::spawn_local(async move {
-        while let Some(result) = ws_receiver.next().await {
+        loop {
+            let result = {
+                let mut handle = ws_receiver.lock().unwrap();
+                handle.next().await
+            };
+            
             match result {
-                Ok(WsMessage::Text(text)) => {
+                Some(Ok(WsMessage::Text(text))) => {
                     console::log_1(&format!("[Receiver] Got text: {}", text).into());
                 }
-                Ok(WsMessage::Binary(data)) => {
+                Some(Ok(WsMessage::Binary(data))) => {
                     console::log_1(&format!("[Receiver] Got {} bytes", data.len()).into());
                 }
-                Err(e) => {
+                Some(Err(e)) => {
                     console::error_1(&format!("[Receiver] Error: {}", e).into());
+                    break;
+                }
+                None => {
+                    console::log_1(&"[Receiver] Stream ended".into());
                     break;
                 }
             }
         }
-        
-        console::log_1(&"[Receiver] Stream ended".into());
     });
 
-    // Clone the handle for the sender task
-    let mut ws_sender = ws.clone();
+    // Share the handle with the sender task
+    let ws_sender = Arc::clone(&ws);
     
     // Send a series of messages
     for i in 0..5 {
         let message = format!("Message number {}", i + 1);
         console::log_1(&format!("[Sender] Sending: {}", message).into());
         
-        if let Err(e) = ws_sender.send(WsMessage::text(message)).await {
+        let send_result = {
+            let mut handle = ws_sender.lock().unwrap();
+            handle.send(WsMessage::text(message)).await
+        };
+        
+        if let Err(e) = send_result {
             console::error_1(&format!("[Sender] Failed to send: {}", e).into());
             break;
         }
@@ -88,7 +101,7 @@ async fn run_advanced_example() {
     gloo_timers::future::TimeoutFuture::new(2000).await;
     
     // Close the connection using the original handle
-    if let Err(e) = ws.close() {
+    if let Err(e) = ws.lock().unwrap().close() {
         console::error_1(&format!("Failed to close: {}", e).into());
     } else {
         console::log_1(&"Connection closed gracefully".into());

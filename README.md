@@ -9,8 +9,7 @@ A Rust library using tokio to remotely control a web-sys websocket from a WsHand
 ### Key Features
 
 - **Sink/Stream Traits**: Use familiar `futures` traits for sending and receiving messages
-- **Send + Sync**: WsHandle is safe to share across async tasks
-- **Clone**: WsHandle can be cloned to use in multiple tasks simultaneously
+- **Send**: WsHandle can be moved across async tasks
 - **Tokio Integration**: Built on tokio channels for efficient async communication
 - **Type-Safe Messages**: Strong typing for text and binary WebSocket messages
 - **Error Handling**: Comprehensive error types for all WebSocket operations
@@ -87,26 +86,36 @@ while let Some(msg) = ws.next().await {
 }
 ```
 
-### Cloning and Sharing
+### Sharing Across Tasks
 
-WsHandle can be cloned to use in multiple tasks:
+To share the handle across multiple tasks, wrap it in an `Arc<Mutex<>>`:
 
 ```rust
 use futures::{SinkExt, StreamExt};
+use std::sync::{Arc, Mutex};
 
-// Clone the handle for concurrent operations
-let mut ws_receiver = ws.clone();
-let mut ws_sender = ws.clone();
+// Wrap the handle for sharing
+let ws = Arc::new(Mutex::new(ws));
 
-// Spawn a task for receiving
+// Clone the Arc for the receiver task
+let ws_receiver = Arc::clone(&ws);
 wasm_bindgen_futures::spawn_local(async move {
-    while let Some(Ok(msg)) = ws_receiver.next().await {
-        println!("Received: {:?}", msg);
+    loop {
+        let result = {
+            let mut handle = ws_receiver.lock().unwrap();
+            handle.next().await
+        };
+        if let Some(Ok(msg)) = result {
+            println!("Received: {:?}", msg);
+        } else {
+            break;
+        }
     }
 });
 
-// Send from another task
-ws_sender.send(WsMessage::text("hello")).await.unwrap();
+// Use from another task
+let ws_sender = Arc::clone(&ws);
+ws_sender.lock().unwrap().send(WsMessage::text("hello")).await.unwrap();
 ```
 
 ### Message Types
@@ -150,18 +159,17 @@ match ws.send(msg).await {
 
 ## Architecture
 
-The library uses a channel-based architecture with safe concurrency:
+The library uses a channel-based architecture:
 
 1. **WsHandle**: The user-facing handle that implements Sink and Stream
-   - Cloneable and shareable across tasks
-   - Receiver wrapped in `Arc<Mutex<>>` for safe sharing
-   - No unsafe code required
+   - Not Clone - wrap in `Arc<Mutex<>>` if sharing is needed
+   - Single consumer for Stream (receiver)
 2. **WsManager**: Internal manager that interfaces with web-sys WebSocket
 3. **Channels**: Tokio channels for communication between handle and manager
    - Command channel (unbounded): Handle → Manager for sending messages
    - Message channel (unbounded): Manager → Handle for receiving messages
 
-This design allows the handle to be Send + Sync + Clone while the actual WebSocket operations happen in the WASM event loop.
+This design allows the handle to be Send while the actual WebSocket operations happen in the WASM event loop.
 
 ## Requirements
 

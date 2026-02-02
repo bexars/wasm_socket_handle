@@ -6,20 +6,18 @@ use crate::message::WsMessage;
 use futures::{Sink, Stream};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 
 pin_project! {
-    /// A handle to a websocket that can be safely shared across threads/tasks.
+    /// A handle to a websocket that can be used in async contexts.
     ///
     /// `WsHandle` implements both `Sink` and `Stream` traits, allowing you to:
     /// - Send messages via `Sink::send()` or `SinkExt::send()`
     /// - Receive messages via `Stream::poll_next()` or `StreamExt::next()`
     ///
-    /// The handle communicates with the actual websocket through channels, making it
-    /// safe to clone and share across different async tasks. The receiver is wrapped
-    /// in an Arc<Mutex<>> to allow safe sharing and cloning.
+    /// The handle communicates with the actual websocket through channels.
+    /// If you need to share the handle across multiple tasks, wrap it in an `Arc<Mutex<WsHandle>>`.
     ///
     /// # Example
     ///
@@ -41,9 +39,9 @@ pin_project! {
     /// ```
     pub struct WsHandle {
         #[pin]
-        rx_msg: Arc<Mutex<mpsc::UnboundedReceiver<WsResult<WsMessage>>>>,
+        rx_msg: mpsc::UnboundedReceiver<WsResult<WsMessage>>,
         tx_cmd: mpsc::UnboundedSender<WsCommand>,
-        _manager: Arc<Option<WsManager>>,
+        _manager: Option<WsManager>,
     }
 }
 
@@ -72,9 +70,9 @@ impl WsHandle {
         let manager = WsManager::new(url, tx_msg, rx_cmd)?;
 
         Ok(Self {
-            rx_msg: Arc::new(Mutex::new(rx_msg)),
+            rx_msg,
             tx_cmd,
-            _manager: Arc::new(Some(manager)),
+            _manager: Some(manager),
         })
     }
 
@@ -97,27 +95,13 @@ impl WsHandle {
     }
 }
 
-impl Clone for WsHandle {
-    fn clone(&self) -> Self {
-        Self {
-            rx_msg: Arc::clone(&self.rx_msg),
-            tx_cmd: self.tx_cmd.clone(),
-            _manager: Arc::clone(&self._manager),
-        }
-    }
-}
-
 // Implement Stream trait for receiving messages
 impl Stream for WsHandle {
     type Item = WsResult<WsMessage>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        // Lock the receiver to poll it
-        // Note: This lock should be very brief as we're just polling
-        let mut rx = this.rx_msg.lock()
-            .expect("WsHandle receiver mutex poisoned - this indicates a panic occurred while holding the lock");
-        rx.poll_recv(cx)
+        let mut this = self.project();
+        this.rx_msg.poll_recv(cx)
     }
 }
 
@@ -154,12 +138,10 @@ impl Sink<WsMessage> for WsHandle {
     }
 }
 
-// WsHandle is automatically Send and Sync because:
-// - Arc<Mutex<T>> is Send + Sync when T is Send
-// - UnboundedReceiver<T> is Send when T is Send
-// - UnboundedSender<T> is Send + Sync when T is Send
-// - WsResult<WsMessage> is Send
-// No unsafe implementations needed!
+// WsHandle is Send but not Sync because:
+// - UnboundedReceiver<T> is Send but not Sync (single consumer)
+// - UnboundedSender<T> is Send + Sync
+// To share across tasks, wrap in Arc<Mutex<WsHandle>>
 
 #[cfg(test)]
 mod tests {
