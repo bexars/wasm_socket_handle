@@ -7,25 +7,23 @@
 //! - Handle errors
 
 use futures::{SinkExt, StreamExt};
+#[cfg(target_arch = "wasm32")]
 use wasm_socket_handle::{WsHandle, WsMessage};
 
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
+#[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     // Initialize panic hook for better error messages
     console_error_panic_hook::set_once();
-    
+
     // Initialize logger
     wasm_logger::init(wasm_logger::Config::default());
-    
+
     run_example().await;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[tokio::main]
+#[main]
 async fn main() {
     println!("This example is designed to run in a WASM environment.");
     println!("Please build with --target wasm32-unknown-unknown and run in a browser.");
