@@ -61,10 +61,11 @@ impl WsManager {
             tracing::error!("Failed to create WebSocket: {:?}", e);
             WsError::ConnectionError(format!("Failed to create WebSocket: {:?}", e))
         });
+
         let ws = match ws {
             Ok(ws) => ws,
             Err(e) => {
-                _ = is_ready.clone().send(Err(e)).unwrap();
+                _ = is_ready.send(Err(e)).unwrap();
                 return;
             }
         };
@@ -133,36 +134,30 @@ impl WsManager {
 
         tracing::info!("is_ready {:?}", &is_ready);
 
-        if let Err(e) = rx_open.changed().await.map_err(|_| {
-            let res = rx_open.borrow();
-            tracing::trace!("rx_open contents {:?}", dbg!(&res));
+        // this shouldn't crash, just be a gatekeeper
+        rx_open
+            .changed()
+            .await
+            .expect("rx_open.change() failed in wasm_socket_handle::manager.rs");
+        let value = rx_open.borrow();
 
-            WsError::ConnectionError("WebSocket open channel closed unexpectedly".to_string())
-        }) {
-            is_ready.send(Err(e)).ok();
-            return;
-        } else {
-            let res = is_ready.send(Ok(()));
-            tracing::trace!("{:?}", dbg!(&res));
-            res.expect("Tried to say is_ready()");
-        }
+        let change = value
+            .as_ref()
+            .expect("rx_open should have Some value after change")
+            .clone();
 
-        // let mut this = Self {
-        //     ws,
-        //     _on_message_closure: on_message_closure,
-        //     _on_error_closure: on_error_closure,
-        //     _on_close_closure: on_close_closure,
-        //     rx_cmd,
-        //     tx_msg,
-        // };
+        drop(value);
 
-        // Spawn a task to handle outgoing commands
-        // let ws_clone = ws.clone();
-        // wasm_bindgen_futures::spawn_local(async move { this.run().await });
-        //     this.run().await
-        // }
+        match change {
+            Ok(_) => {
+                is_ready.send(Ok(())).ok();
+            }
+            Err(e) => {
+                is_ready.send(Err(e.clone())).ok();
+                return;
+            }
+        };
 
-        // pub async fn run(&mut self) {
         tracing::debug!("Entering while loop");
 
         enum SelectResult {
@@ -170,7 +165,6 @@ impl WsManager {
             WatchChanged,
         }
 
-        // while let Some(cmd) = rx_cmd.recv().await {
         loop {
             let select = select! {
                 cmd = rx_cmd.recv() => { SelectResult::WsCommand(cmd) }
